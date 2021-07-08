@@ -118,6 +118,10 @@ public class LockManager {
             return;
         }
 
+        public void releaseLock(Lock lock) {
+            getResourceEntry(lock.name).releaseLock(lock.transactionNum);
+        }
+
         /**
          * Adds `request` to the front of the queue if addFront is true, or to
          * the end otherwise.
@@ -141,7 +145,10 @@ public class LockManager {
                 LockRequest lockRequest = requests.next();
                 if(checkCompatible(lockRequest.lock.lockType, lockRequest.lock.transactionNum)) {
                     waitingQueue.removeFirst();
+                    for(Lock lock : lockRequest.releasedLocks)
+                        releaseLock(lock);
                     grantOrUpdateLock(lockRequest.lock);
+
                     lockRequest.transaction.unblock();
                 }
                 else
@@ -214,8 +221,14 @@ public class LockManager {
         // move the synchronized block elsewhere if you wish.
         boolean shouldBlock = false;
         synchronized (this) {
+            List<Lock> releasedLocks = new ArrayList<>();
+            for(ResourceName resourceName : releaseNames) {
+                releasedLocks.add(new Lock(resourceName, LockType.NL, transaction.getTransNum()));
+            }
             Lock lock = new Lock(name, lockType, transaction.getTransNum());
-            LockRequest lockRequest = new LockRequest(transaction, lock);
+
+
+            LockRequest lockRequest = new LockRequest(transaction, lock, releasedLocks);
             ResourceEntry resource = getResourceEntry(name);
 
             LockType prevLockType = getLockType(transaction, name);
@@ -224,11 +237,6 @@ public class LockManager {
 
 
             if(resource.checkCompatible(lockType, transaction.getTransNum())  && resource.waitingQueue.size() == 0) {
-                for(ResourceName resourceName : releaseNames) {
-                    ResourceEntry resourceEntry = getResourceEntry(resourceName);
-                    resourceEntry.releaseLock(transaction.getTransNum());
-                    resourceEntry.processQueue();
-                }
                 resource.addToQueue(lockRequest, true);
                 resource.processQueue();
 
